@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.agents/
+.claude/
+.pytest_cache/
+.streamlit/secrets.toml
+xray_classifier.pth
+reports/*
+!reports/.gitkeep
