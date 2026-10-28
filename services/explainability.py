@@ -10,7 +10,7 @@ from services.modality_validation import (
     SuitabilityValidationResult,
     require_suitability_pass,
 )
-from services.preprocessing import center_crop_image, preprocess_image
+from services.inference import preprocess_disease_image
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +35,9 @@ def generate_gradcam(
     try:
         model, torch = load_model()
         features = getattr(model, "features", None)
-        target_layer = getattr(features, "denseblock4", None)
-        if target_layer is None:
+        if features is None:
             raise ExplainabilityUnavailableError(
-                "Grad-CAM is unavailable because the loaded model has no supported target layer."
+                "Grad-CAM is unavailable because the disease model has no feature extractor."
             )
 
         def capture_activation(_module, _inputs, output):
@@ -46,9 +45,9 @@ def generate_gradcam(
             activation = output
             output.retain_grad()
 
-        handle = target_layer.register_forward_hook(capture_activation)
+        handle = features.register_forward_hook(capture_activation)
         model.zero_grad(set_to_none=True)
-        tensor = torch.from_numpy(preprocess_image(image)).to(next(model.parameters()).device)
+        tensor = preprocess_disease_image(image).to(next(model.parameters()).device)
         output = model(tensor)
         if (
             output.ndim != 2
@@ -64,9 +63,8 @@ def generate_gradcam(
         gradient = activation.grad.detach().mean(dim=(2, 3), keepdim=True)
         activation_values = activation.detach()
         cam = torch.relu((gradient * activation_values).sum(dim=1, keepdim=True))
-        cropped_image = center_crop_image(image)
         cam = torch.nn.functional.interpolate(
-            cam, size=cropped_image.size[::-1], mode="bilinear", align_corners=False
+            cam, size=image.size[::-1], mode="bicubic", align_corners=False
         )[0, 0]
         heatmap = cam.cpu().numpy()
         maximum = float(heatmap.max())
@@ -79,18 +77,13 @@ def generate_gradcam(
         colormap = matplotlib.colormaps["magma"]
         rgb = (colormap(heatmap)[..., :3] * 255).astype(np.uint8)
         color = Image.fromarray(rgb, mode="RGB")
-        base = image.convert("L").convert("RGB")
-        cropped_base = cropped_image.convert("RGB")
-        overlay_crop = Image.blend(cropped_base, color, alpha=0.42)
-        left = (image.width - cropped_image.width) // 2
-        top = (image.height - cropped_image.height) // 2
-        base.paste(overlay_crop, (left, top))
-        return base
+        base = image.convert("RGB")
+        return Image.blend(base, color, alpha=0.42)
     except ExplainabilityUnavailableError:
         raise
     except ModelUnavailableError as exc:
         raise ExplainabilityUnavailableError(
-            "Grad-CAM is unavailable because the pretrained model could not be loaded."
+            "Grad-CAM is unavailable because the local disease model could not be loaded."
         ) from exc
     except Exception as exc:
         logger.exception("Grad-CAM generation failed.")

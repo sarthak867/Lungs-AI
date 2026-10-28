@@ -1,0 +1,72 @@
+{
+  "Atelectasis": {
+    "threshold": 0.2257080078125,
+    "n_pos_val": 875,
+    "source": "youden(val)"
+  },
+  "Cardiomegaly": {
+    "threshold": 0.049957275390625,
+    "n_pos_val": 158,
+    "source": "youden(val)"
+  },
+  "Consolidation": {
+    "threshold": 0.12127685546875,
+    "n_pos_val": 268,
+    "source": "youden(val)"
+  },
+  "Edema": {
+    "threshold": 0.047607421875,
+    "n_pos_val": 125,
+    "source": "youden(val)"
+  },
+  "Effusion": {
+    "threshold": 0.257568359375,
+    "n_pos_val": 807,
+    "source": "youden(val)"
+  },
+  "Emphysema": {
+    "threshold": 0.053985595703125,
+    "n_pos_val": 106,
+    "source": "youden(val)"
+  },
+  "Fibrosis": {
+    "threshold": 0.0273284912109375,
+    "n_pos_val": 140,
+    "source": "youden(val)"
+  },
+  "Hernia": {
+    "threshold": 0.009999999776482582,
+    "n_pos_val": 19,
+    "source": "youden(val)"
+  },
+  "Infiltration": {
+    "threshold": 0.438720703125,
+    "n_pos_val": 1302,
+    "source": "youden(val)"
+  },
+  "Mass": {
+    "threshold": 0.134521484375,
+    "n_pos_val": 388,
+    "source": "youden(val)"
+  },
+  "Nodule": {
+    "threshold": 0.1724853515625,
+    "n_pos_val": 461,
+    "source": "youden(val)"
+  },
+  "Pleural_Thickening": {
+    "threshold": 0.07464599609375,
+    "n_pos_val": 245,
+    "source": "youden(val)"
+  },
+  "Pneumonia": {
+    "threshold": 0.055816650390625,
+    "n_pos_val": 93,
+    "source": "youden(val)"
+  },
+  "Pneumothorax": {
+    "threshold": 0.114990234375,
+    "n_pos_val": 243,
+    "source": "youden(val)"
+  }
+}

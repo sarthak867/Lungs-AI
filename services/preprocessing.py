@@ -7,7 +7,7 @@ from io import BytesIO
 import numpy as np
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from config import MAX_IMAGE_PIXELS, MAX_UPLOAD_BYTES, MODEL_INPUT_SIZE
+from config import MAX_IMAGE_PIXELS, MAX_UPLOAD_BYTES
 
 ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg"}
 
@@ -99,21 +99,3 @@ def validate_image(data: bytes, filename: str) -> ValidatedImage:
     if not result.accepted or result.validated_image is None:
         raise ImageValidationError(result.reason)
     return result.validated_image
-
-
-def preprocess_image(image: Image.Image, input_size: int = MODEL_INPUT_SIZE) -> np.ndarray:
-    """Prepare a grayscale tensor using TorchXRayVision's center-crop and normalization."""
-    if input_size <= 0:
-        raise ValueError("input_size must be greater than zero.")
-    resized = center_crop_image(image).resize((input_size, input_size), Image.Resampling.BILINEAR)
-    pixels = np.asarray(resized, dtype=np.float32)
-    normalized = (2.0 * (pixels / 255.0) - 1.0) * 1024.0
-    return normalized[np.newaxis, np.newaxis, :, :].astype(np.float32, copy=False)
-
-
-def center_crop_image(image: Image.Image) -> Image.Image:
-    grayscale = image.convert("L")
-    side = min(grayscale.size)
-    left = (grayscale.width - side) // 2
-    top = (grayscale.height - side) // 2
-    return grayscale.crop((left, top, left + side, top + side))

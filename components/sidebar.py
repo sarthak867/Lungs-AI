@@ -3,7 +3,7 @@ from __future__ import annotations
 from base64 import b64encode
 import streamlit as st
 
-from config import APP_NAME, APP_SUBTITLE, CHECKPOINT_ID, MODEL_NAME, PROJECT_ROOT
+from config import APP_NAME, APP_SUBTITLE, CHECKPOINT_ID, PROJECT_ROOT
 
 
 def render_sidebar() -> str:
@@ -34,7 +34,7 @@ def render_sidebar() -> str:
             <div class="telemetry-card">
                 <div class="telemetry-header">
                     <span class="pulse-indicator"></span>
-                    <span class="telemetry-title">MODEL OPERATIONAL</span>
+                    <span class="telemetry-title">LOCAL MODEL CONFIGURED</span>
                 </div>
                 <div class="telemetry-grid">
                     <div class="telemetry-item">
@@ -43,15 +43,15 @@ def render_sidebar() -> str:
                     </div>
                     <div class="telemetry-item">
                         <span class="telemetry-label">Heads</span>
-                        <span class="telemetry-val">18 Pathologies</span>
+                        <span class="telemetry-val">14 disease labels</span>
                     </div>
                     <div class="telemetry-item">
                         <span class="telemetry-label">Weights</span>
-                        <span class="telemetry-val">res224-all</span>
+                        <span class="telemetry-val">{CHECKPOINT_ID}</span>
                     </div>
                     <div class="telemetry-item">
                         <span class="telemetry-label">Attribution</span>
-                        <span class="telemetry-val">denseblock4</span>
+                        <span class="telemetry-val">Grad-CAM</span>
                     </div>
                 </div>
             </div>

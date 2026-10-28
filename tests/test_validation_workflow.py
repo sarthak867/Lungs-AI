@@ -33,6 +33,8 @@ def test_changing_upload_clears_previous_predictions_heatmaps_and_report():
         "analysis": object(),
         "analysis_hash": "old-hash",
         "gradcam": object(),
+        "gradcams": {"old label": object()},
+        "gradcam_errors": {"old label": "old error"},
         "gradcam_label": "old label",
         "report_bytes": b"old report",
     }
@@ -52,6 +54,8 @@ def test_changing_upload_clears_previous_predictions_heatmaps_and_report():
     register_valid_upload(state, second, "first.png", validate_image(second, "first.png"))
     assert "analysis" not in state
     assert "gradcam" not in state
+    assert "gradcams" not in state
+    assert "gradcam_errors" not in state
     assert "report_bytes" not in state
     assert "suitability_validation" not in state
     assert state["image_hash"] != accepted.content_hash
@@ -199,6 +203,66 @@ def test_streamlit_rechecks_gate_before_inference_and_blocks_new_rejection(monke
     assert any("Image rejected:" in item.value for item in app.error)
     assert app.session_state.get("suitability_validation").status is SuitabilityStatus.REJECTED
     assert not app.session_state.get("analysis")
+
+
+def test_streamlit_pdf_export_uses_original_image_and_gradcam_mapping(monkeypatch):
+    from datetime import datetime, timezone
+
+    from streamlit.testing.v1 import AppTest
+
+    from services import xray_gate_model
+    from services.inference import (
+        PATHOLOGY_LABELS,
+        AnalysisResult,
+        Prediction,
+        disease_model_revision,
+    )
+    from services.modality_validation import fingerprint_image
+
+    monkeypatch.setattr(
+        xray_gate_model,
+        "classify_chest_xray",
+        lambda _image: SuitabilityDecision(
+            SuitabilityStatus.ACCEPTED,
+            "Mock gate pass for PDF app integration test.",
+        ),
+    )
+
+    def mock_inference(image, *, image_hash, validation):
+        predictions = tuple(
+            Prediction(label, 0.9 if index == 0 else 0.01, 0.5)
+            for index, label in enumerate(PATHOLOGY_LABELS)
+        )
+        return AnalysisResult(
+            model_name="Mock model (application integration test only)",
+            checkpoint_id="mock-checkpoint",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            predictions=predictions,
+            score_semantics="Mocked independent sigmoid score; not model output",
+            raw_scores=tuple(0.0 for _ in PATHOLOGY_LABELS),
+            pathologies=PATHOLOGY_LABELS,
+            image_hash=image_hash,
+            image_fingerprint=fingerprint_image(image),
+            model_revision=disease_model_revision(),
+        )
+
+    monkeypatch.setattr("services.inference.run_inference", mock_inference)
+    monkeypatch.setattr(
+        "services.explainability.generate_gradcam",
+        lambda image, *_args, **_kwargs: Image.new("RGB", image.size, color="red"),
+    )
+
+    app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py", default_timeout=20).run()
+    app.file_uploader[0].set_value(("sample.png", png_bytes(), "image/png")).run(timeout=20)
+    app.radio[0].set_value("Analyze X-Ray").run(timeout=20)
+    run_button = next(button for button in app.button if "DenseNet-121 Analysis" in button.label)
+    run_button.click().run(timeout=20)
+
+    assert not app.exception
+    assert app.session_state["analysis"].findings
+    assert app.session_state["gradcams"]
+    assert any("Download Research Dossier (PDF)" in button.label for button in app.download_button)
+    assert not any("Could not compile PDF report dossier" in item.value for item in app.error)
 
 
 def test_streamlit_corrupt_image_fails_closed_without_crashing():

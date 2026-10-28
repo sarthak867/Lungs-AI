@@ -13,6 +13,7 @@ from services.inference import (
     AnalysisResult,
     InferenceError,
     ModelUnavailableError,
+    disease_model_revision,
     run_inference,
 )
 from services.preprocessing import (
@@ -37,6 +38,8 @@ from services.upload_state import (
     register_valid_upload,
 )
 from services.xray_gate_model import classifier_revision
+from Disese_model.explanations import DISCLAIMER as DISEASE_DISCLAIMER
+from Disese_model.explanations import EXPLANATIONS
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1045,8 +1048,8 @@ def upload_panel(show_analysis_cta: bool = False) -> None:
                             <span class="meta-box-value font-mono">{validated.width} × {validated.height} px</span>
                         </div>
                         <div class="meta-box">
-                            <span class="meta-box-label">Tensor Geometry</span>
-                            <span class="meta-box-value font-mono">224 × 224 Center-Crop</span>
+                            <span class="meta-box-label">Disease Model Input</span>
+                            <span class="meta-box-value font-mono">320 × 320 Grayscale RGB</span>
                         </div>
                         <div class="meta-box">
                             <span class="meta-box-label">Integrity Status</span>
@@ -1123,9 +1126,9 @@ def page_overview() -> None:
             <h1 class="hero-title">See beyond the X-ray.</h1>
             <p class="hero-copy">Explore AI-assisted chest X-ray analysis with transparent multi-label predictions and gradient-weighted visual explanations.</p>
             <div class="ribbon-badges">
-                <div class="ribbon-chip"><span class="dot"></span>TorchXRayVision Engine</div>
-                <div class="ribbon-chip"><span class="dot"></span>18 Pathology Classifier Heads</div>
-                <div class="ribbon-chip"><span class="dot"></span>Grad-CAM denseblock4 Attribution</div>
+                <div class="ribbon-chip"><span class="dot"></span>Local DenseNet-121 Checkpoint</div>
+                <div class="ribbon-chip"><span class="dot"></span>14 Independent Disease Scores</div>
+                <div class="ribbon-chip"><span class="dot"></span>Grad-CAM DenseNet Feature Attribution</div>
                 <div class="ribbon-chip"><span class="dot"></span>Zero-Retention In-Memory Privacy</div>
             </div>
         </div>
@@ -1143,7 +1146,7 @@ def page_overview() -> None:
                 <div>
                     <div class="feature-num">MODULE 01</div>
                     <h3>Multi-Target Pathology Profiling</h3>
-                    <p>The local `xray_classifier.pth` `Normal Photo` vs `X-Ray` gate checks the upload before the pretrained pathology model runs.</p>
+                    <p>The local `xray_classifier.pth` `Normal Photo` vs `X-Ray` gate checks the upload before the project disease model runs.</p>
                 </div>
             </div>
             <div class="feature-card-modern">
@@ -1177,13 +1180,13 @@ def page_overview() -> None:
             </div>
             <div class="workflow-card">
                 <span class="workflow-step-num">STEP 02</span>
-                <div class="workflow-title">Geometry Normalization</div>
-                <p class="workflow-desc">Center-square crop and resize to 224 × 224, mapped into the standard [-1024, 1024] range.</p>
+                <div class="workflow-title">Image Preparation</div>
+                <p class="workflow-desc">The suitability gate and disease model each apply their own checkpoint-specific input preprocessing.</p>
             </div>
             <div class="workflow-card">
                 <span class="workflow-step-num">STEP 03</span>
-                <div class="workflow-title">DenseNet Inference</div>
-                <p class="workflow-desc">Run the local checkpoint X-ray-vs-photo classifier; stop on photo or uncertain output.</p>
+                <div class="workflow-title">Gated Disease Inference</div>
+                <p class="workflow-desc">Run the local 14-label DenseNet-121 only after the X-ray suitability checkpoint accepts the image.</p>
             </div>
             <div class="workflow-card">
                 <span class="workflow-step-num">STEP 04</span>
@@ -1201,7 +1204,7 @@ def page_overview() -> None:
         <div class="modern-card">
             <div class="eyebrow-pill">RESEARCH PROTOCOL & GOVERNANCE</div>
             <p style="color:var(--text-secondary); font-size:13px; line-height:1.6; margin:6px 0 0 0;">
-                LungLens AI connects an open-source deep learning checkpoint (<code>densenet121-res224-all</code>) to an explainable research interface.
+                LungLens AI uses the project-provided fine-tuned DenseNet-121 checkpoint and a separate X-ray input gate.
                 This software is intended strictly for algorithm development, educational demonstrations, and biomedical machine learning inspection.
                 It has not been cleared as a medical device by the FDA or international regulatory authorities.
             </p>
@@ -1217,7 +1220,7 @@ def page_analysis() -> None:
         <div class="hero-container" style="padding-bottom: 0.5rem;">
             <div class="eyebrow-pill">ANALYSIS WORKSPACE</div>
             <h1 class="hero-title" style="font-size:38px;">Analyze Radiograph</h1>
-            <p class="hero-copy" style="font-size:15px; margin-bottom:12px;">Run DenseNet-121 multi-label inference and inspect gradient-weighted class activation mapping (Grad-CAM).</p>
+            <p class="hero-copy" style="font-size:15px; margin-bottom:12px;">Run the local 14-label DenseNet-121 model and inspect class-specific Grad-CAM attribution.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1274,7 +1277,7 @@ def page_analysis() -> None:
             clear_result_state(st.session_state)
             st.error(suitability_message(validation))
         else:
-            with st.spinner("Executing DenseNet-121 forward pass and backpropagating attribution gradients…"):
+            with st.spinner("Executing local DenseNet-121 analysis and generating attribution…"):
                 try:
                     result = run_inference(
                         image,
@@ -1284,34 +1287,43 @@ def page_analysis() -> None:
                     st.session_state.analysis = result
                     st.session_state.analysis_hash = image_hash
 
-                    best_idx = max(
-                        range(len(result.raw_scores)),
-                        key=lambda idx: abs(result.raw_scores[idx]),
+                    gradcams = {}
+                    gradcam_errors = {}
+                    for finding in result.findings:
+                        target_idx = result.pathologies.index(finding.label)
+                        try:
+                            gradcams[finding.label] = generate_gradcam(
+                                image,
+                                result,
+                                target_index=target_idx,
+                                image_hash=image_hash,
+                                validation=validation,
+                            )
+                        except (ExplainabilityUnavailableError, SuitabilityGateError) as exc:
+                            gradcam_errors[finding.label] = (
+                                suitability_message(validation)
+                                if isinstance(exc, SuitabilityGateError)
+                                else str(exc)
+                            )
+                            logger.warning(
+                                "Grad-CAM unavailable for threshold-crossing finding %s: %s",
+                                finding.label,
+                                exc,
+                            )
+                    st.session_state.gradcams = gradcams
+                    st.session_state.gradcam_errors = gradcam_errors
+                    st.session_state.gradcam_label = result.findings[0].label if result.findings else None
+                    st.session_state.gradcam = (
+                        gradcams.get(st.session_state.gradcam_label)
+                        if st.session_state.gradcam_label
+                        else None
                     )
-                    try:
-                        st.session_state.gradcam = generate_gradcam(
-                            image,
-                            result,
-                            target_index=best_idx,
-                            image_hash=image_hash,
-                            validation=validation,
-                        )
-                        st.session_state.gradcam_label = result.pathologies[best_idx]
-                        st.session_state.gradcam_index = best_idx
-                        st.session_state.gradcam_error = None
-                    except (ExplainabilityUnavailableError, SuitabilityGateError) as exc:
-                        st.session_state.gradcam = None
-                        st.session_state.gradcam_error = (
-                            suitability_message(validation)
-                            if isinstance(exc, SuitabilityGateError)
-                            else str(exc)
-                        )
-                        logger.warning("Explainability unavailable: %s", exc)
+                    st.session_state.gradcam_error = None
 
                 except ModelUnavailableError as exc:
                     logger.error("Model unavailable: %s", exc)
                     st.error(
-                        "Model unavailable. Check that Torch and TorchXRayVision are installed and network access is available to download model weights."
+                        "Disease model unavailable. Verify Disese_model/my_densenet121.pt, the threshold JSON, and the PyTorch installation."
                     )
                 except InferenceError as exc:
                     logger.error("Inference failed: %s", exc)
@@ -1326,6 +1338,7 @@ def page_analysis() -> None:
         and (
             result.image_hash != image_hash
             or st.session_state.get("analysis_hash") != image_hash
+            or result.model_revision != disease_model_revision()
             or not validation.accepted
         )
     ):
@@ -1382,61 +1395,50 @@ def page_analysis() -> None:
             <div class="studio-frame-card">
                 <div class="frame-title">
                     <span>Dual Imaging Studio</span>
-                    <span class="inspect-badge">denseblock4 Attributions</span>
+                    <span class="inspect-badge">DenseNet feature attributions</span>
                 </div>
             """,
             unsafe_allow_html=True,
         )
 
-        # Pathology Selector for Grad-CAM
-        selected_label = st.selectbox(
-            "Select Pathology for Grad-CAM Attribution Map:",
-            options=list(result.pathologies),
-            index=result.pathologies.index(st.session_state.get("gradcam_label", result.pathologies[0])),
-            key="gradcam_target_selector",
-            help="Choose any of the 18 pathology outputs to inspect which convolutional receptive fields contributed to that specific activation.",
-        )
+        threshold_findings = result.findings
+        if threshold_findings:
+            finding_labels = [finding.label for finding in threshold_findings]
+            if st.session_state.get("gradcam_target_selector") not in finding_labels:
+                st.session_state.pop("gradcam_target_selector", None)
+            previous_label = st.session_state.get("gradcam_label")
+            selected_label = st.selectbox(
+                "Select Pathology for Grad-CAM Attribution Map:",
+                options=finding_labels,
+                index=finding_labels.index(previous_label) if previous_label in finding_labels else 0,
+                format_func=lambda label: (
+                    f"{label.replace('_', ' ')} · "
+                    f"{next(finding.score for finding in threshold_findings if finding.label == label):.1%}"
+                ),
+                key="gradcam_target_selector",
+                help="Only outputs meeting their supplied cutoff are available, ordered by score from highest to lowest.",
+            )
+            st.session_state.gradcam_label = selected_label
+            gradcams = st.session_state.get("gradcams", {})
+            gradcam = gradcams.get(selected_label)
+            st.session_state.gradcam = gradcam
+            gradcam_error = st.session_state.get("gradcam_errors", {}).get(selected_label)
 
-        # Recompute Grad-CAM if selector changed
-        if selected_label != st.session_state.get("gradcam_label"):
-            target_idx = result.pathologies.index(selected_label)
-            try:
-                st.session_state.gradcam = generate_gradcam(
-                    image,
-                    result,
-                    target_index=target_idx,
-                    image_hash=image_hash,
-                    validation=validation,
-                )
-                st.session_state.gradcam_label = selected_label
-                st.session_state.gradcam_error = None
-            except (ExplainabilityUnavailableError, SuitabilityGateError) as exc:
-                st.session_state.gradcam = None
-                st.session_state.gradcam_error = (
-                    suitability_message(validation)
-                    if isinstance(exc, SuitabilityGateError)
-                    else str(exc)
-                )
+            img_c1, img_c2 = st.columns(2)
+            with img_c1:
+                st.image(image, caption="Original radiograph", width="stretch")
+            with img_c2:
+                if gradcam is not None:
+                    st.image(
+                        gradcam,
+                        caption=f"Grad-CAM attribution · {selected_label.replace('_', ' ')}",
+                        width="stretch",
+                    )
+                else:
+                    st.warning(gradcam_error or "Grad-CAM could not be generated for this finding.")
 
-        gradcam = st.session_state.get("gradcam")
-
-        # Side-by-side Radiographs
-        img_c1, img_c2 = st.columns(2)
-        with img_c1:
-            st.image(image, caption="Original Radiograph (Preview Proportions)", width="stretch")
-        with img_c2:
-            if gradcam is not None:
-                st.image(
-                    gradcam,
-                    caption=f"Grad-CAM Attribution Overlay · {selected_label}",
-                    width="stretch",
-                )
-            else:
-                st.warning(st.session_state.get("gradcam_error") or "Grad-CAM could not be generated for this target.")
-
-        # Scientific Colormap Legend
-        st.markdown(
-            """
+            st.markdown(
+                """
             <div class="colormap-container">
                 <div class="colormap-header">
                     <span>ATTRIBUTION MAGNITUDE (MAGMA SCALE)</span>
@@ -1450,27 +1452,45 @@ def page_analysis() -> None:
                 </div>
             </div>
             <div class="attribution-explainer">
-                <b>Receptive Field Interpretation:</b> Saliency is backpropagated to the 224 × 224 center-crop model input.
+                <b>Attribution interpretation:</b> Saliency is backpropagated through the 320 × 320 model input.
                 High activation (yellow/orange) indicates features the neural network prioritized for <b>"""
             + _escape(selected_label)
             + """</b>. It denotes algorithm attention, not anatomical lesion borders or confirmed pathology.
             </div>
             </div>
             """,
-            unsafe_allow_html=True,
-        )
+                unsafe_allow_html=True,
+            )
+            explanation = EXPLANATIONS.get(selected_label)
+            if explanation:
+                st.info(
+                    f"General educational imaging reference for {_escape(selected_label.replace('_', ' '))}: "
+                    f"{_escape(explanation)} {DISEASE_DISCLAIMER}"
+                )
+        else:
+            gradcam = None
+            st.info(
+                "No disease output crossed its supplied per-label cutoff, so there is no threshold-qualified "
+                "pathology to select for Grad-CAM."
+            )
 
     with col_scores:
         render_predictions(result)
 
     # Formal Research Dossier & PDF Export
-    render_report_section(result, image, gradcam, image_hash, validation)
+    render_report_section(
+        result=result,
+        image=image,
+        gradcam_images=st.session_state.get("gradcams", {}),
+        image_hash=image_hash,
+        validation=validation,
+    )
 
 
 def render_report_section(
     result: AnalysisResult,
     image: Image.Image,
-    gradcam: Image.Image | None,
+    gradcam_images: dict[str, Image.Image],
     image_hash: str,
     validation: SuitabilityValidationResult,
 ) -> None:
@@ -1487,13 +1507,26 @@ def render_report_section(
 
     try:
         pdf_bytes = generate_pdf_report(
-            result,
-            st.session_state.image_name,
-            image,
-            gradcam,
+            result=result,
+            filename=st.session_state.image_name,
+            original_image=image,
+            gradcam_images=gradcam_images,
             image_hash=image_hash,
             validation=validation,
         )
+    except Exception as exc:
+        logger.exception("PDF generation failed: %s", exc)
+        st.error(f"Could not compile PDF report dossier: {exc}")
+    else:
+        missing_attributions = [
+            finding.label for finding in result.findings if finding.label not in gradcam_images
+        ]
+        if missing_attributions:
+            st.caption(
+                "The PDF includes every threshold-crossing finding. Grad-CAM was unavailable for: "
+                + ", ".join(label.replace("_", " ") for label in missing_attributions)
+                + ". No attribution image is fabricated."
+            )
         st.download_button(
             "Download Research Dossier (PDF)",
             data=pdf_bytes,
@@ -1501,9 +1534,6 @@ def render_report_section(
             mime="application/pdf",
             type="primary",
         )
-    except Exception as exc:
-        logger.exception("PDF generation failed: %s", exc)
-        st.error("Could not compile PDF report dossier. Please retry.")
 
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1514,7 +1544,7 @@ def page_about() -> None:
         <div class="hero-container" style="padding-bottom:0.5rem;">
             <div class="eyebrow-pill">SPECIFICATIONS & METHODOLOGY</div>
             <h1 class="hero-title" style="font-size:38px;">Model Architecture & Methodology</h1>
-            <p class="hero-copy" style="font-size:15px; margin-bottom:12px;">Technical documentation for the TorchXRayVision DenseNet-121 architecture, preprocessing protocol, and explainability layer.</p>
+            <p class="hero-copy" style="font-size:15px; margin-bottom:12px;">Technical documentation for the local X-ray gate, project DenseNet-121 model, preprocessing, thresholds, and explainability.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1530,8 +1560,8 @@ def page_about() -> None:
         "Input handling has two separate stages. **File validation** checks PNG/JPEG format, decodability, "
         "size limits, and EXIF orientation. It does not identify modality. **Chest X-ray suitability validation** "
         "uses only the supplied local checkpoint, `xray_classifier.pth`, with outputs Normal Photo (0) and "
-        "X-Ray (1). The image is converted to RGB, resized to 224 × 224, converted to a tensor, and normalized with "
-        "the training-provided ImageNet mean/std. The configurable decision threshold defaults to 0.8; it has not "
+        "X-Ray (1). The image is converted to RGB, resized to the gate model's configured input size, converted to "
+        "a tensor, and normalized with the gate's ImageNet mean/std. The configurable decision threshold defaults to 0.8; it has not "
         "been tuned or clinically validated. "
         "Scores are not calibrated. A pass is not a guarantee of authenticity, frontal view, or clinical usability."
     )
@@ -1545,18 +1575,18 @@ def page_about() -> None:
         st.markdown(
             """
             <div class="modern-card">
-                <h3 style="margin-top:0; color:var(--text-primary);">Pretrained Model Architecture</h3>
+                <h3 style="margin-top:0; color:var(--text-primary);">Project disease model</h3>
                 <p style="color:var(--text-secondary); font-size:13px; line-height:1.6;">
-                    The system integrates TorchXRayVision's DenseNet-121 backbone (<code>densenet121-res224-all</code>), trained across major public chest radiograph corpora
-                    (NIH ChestX-ray14, CheXpert, PadChest, and MIMIC-CXR).
+                    A locally loaded torchvision DenseNet-121 fine-tuned by the project owner on NIH ChestX-ray14 data. The checkpoint is
+                    <code>Disese_model/my_densenet121.pt</code>; its raw 14-output logits are converted with independent
+                    sigmoid functions, not softmax.
                 </p>
                 <div style="background:var(--bg-surface); padding:12px; border-radius:8px; border:1px solid var(--border-light); font-size:12px; color:var(--text-muted); line-height:1.6;">
-                    • <b>Backbone:</b> DenseNet-121 (Dense Convolutional Network)<br>
-                    • <b>Parameter Count:</b> ~7.0 Million parameters<br>
-                    • <b>Checkpoint:</b> densenet121-res224-all<br>
-                    • <b>Input Dimensions:</b> 1 × 1 × 224 × 224 (NCHW Tensor)<br>
-                    • <b>Normalization:</b> Grayscale [-1024, 1024] TorchXRayVision scale<br>
-                    • <b>Pathology Heads:</b> 18 multi-label classification outputs
+                    • <b>Input:</b> Grayscale → 320 × 320 bilinear resize → RGB<br>
+                    • <b>Normalization:</b> ImageNet mean/std<br>
+                    • <b>Outputs:</b> Atelectasis, Cardiomegaly, Consolidation, Edema, Effusion, Emphysema, Fibrosis, Hernia, Infiltration, Mass, Nodule, Pleural Thickening, Pneumonia, Pneumothorax<br>
+                    • <b>Thresholds:</b> Per-label validation-set Youden's J values in <code>thresholds_my.json</code><br>
+                    • <b>No normal class:</b> No score crossing a cutoff does not establish a normal image
                 </div>
             </div>
             """,
@@ -1566,15 +1596,10 @@ def page_about() -> None:
         st.markdown(
             """
             <div class="modern-card">
-                <h3 style="margin-top:0; color:var(--text-primary);">Supported Pathology Classifier Heads</h3>
+                <h3 style="margin-top:0; color:var(--text-primary);">Threshold and evaluation notes</h3>
                 <p style="color:var(--text-secondary); font-size:13px; line-height:1.6;">
-                    The 18 multi-label outputs correspond to the pathology vocabulary defined by the <code>all</code> checkpoint:
+                    Per-label thresholds were selected by Youden's J on validation data. The owner-reported test summary is mean AUROC 0.799 and mean AUPRC 0.253. Reported specificity is low for some labels (Consolidation ~0.39, Infiltration ~0.50, Effusion ~0.53); the Hernia cutoff is especially uncertain due to few positive cases. These are not clinical performance estimates.
                 </p>
-                <div style="font-size:12px; color:var(--accent-cyan); line-height:1.8;">
-                    Atelectasis · Consolidation · Infiltration · Pneumothorax · Edema · Emphysema · Fibrosis · Effusion ·
-                    Pneumonia · Pleural Thickening · Cardiomegaly · Nodule · Mass · Hernia · Lung Lesion · Fracture ·
-                    Lung Opacity · Enlarged Cardiomediastinum
-                </div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1586,15 +1611,15 @@ def page_about() -> None:
             <div class="modern-card">
                 <h3 style="margin-top:0; color:var(--text-primary);">Visual Explainability (Grad-CAM)</h3>
                 <p style="color:var(--text-secondary); font-size:13px; line-height:1.6;">
-                    Gradient-weighted Class Activation Mapping (Grad-CAM) computes the gradients of the chosen pathology logit
-                    with respect to the final convolutional feature maps in DenseNet-121's <code>denseblock4</code>.
+                    Gradient-weighted Class Activation Mapping (Grad-CAM) computes gradients for the selected disease logit
+                    with respect to the DenseNet-121 feature extractor output.
                 </p>
                 <div style="background:var(--bg-surface); padding:12px; border-radius:8px; border:1px solid var(--border-light); font-size:12px; color:var(--text-muted); line-height:1.6;">
-                    1. <b>Forward Pass:</b> Computes feature activations at <code>denseblock4</code>.<br>
+                    1. <b>Forward Pass:</b> Computes activations from the final convolutional feature extractor.<br>
                     2. <b>Backward Hook:</b> Propagates gradients from the selected output head.<br>
                     3. <b>Spatial Pooling:</b> Global-average-pools gradients to yield neuron importance weights.<br>
                     4. <b>ReLU Rectification:</b> Isolates features with positive influence on the target class.<br>
-                    5. <b>Bilinear Interpolation:</b> Upsamples the 7×7 CAM to the center-crop radiograph frame.
+                    5. <b>Interpolation:</b> Resizes the low-resolution attribution map to the input image size.
                 </div>
             </div>
             """,
@@ -1608,7 +1633,8 @@ def page_about() -> None:
                 <p style="color:var(--text-secondary); font-size:13px; line-height:1.6;">
                     • <b>Zero Persistent Retention:</b> All image arrays and inference tensors are kept ephemerally in RAM.<br>
                     • <b>De-Identification Required:</b> Operators must ensure uploaded scans have all PHI (Patient Health Information) removed.<br>
-                    • <b>Open Science Provenance:</b> Built upon TorchXRayVision (Cohen et al., ML4H / JMLR).
+                    • <b>Training:</b> Project-owner reports NIH ChestX-ray14 data and an official split.<br>
+                    • <b>Use:</b> Educational/research only; not a medical device or diagnosis.
                 </p>
             </div>
             """,

@@ -10,6 +10,7 @@ from reportlab.lib.units import inch
 from reportlab.platypus import HRFlowable, Image as ReportImage
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from Disese_model.explanations import DISCLAIMER, EXPLANATIONS
 from services.inference import AnalysisResult
 from services.modality_validation import (
     SuitabilityValidationResult,
@@ -21,14 +22,19 @@ from services.modality_validation import (
 def generate_pdf_report(
     result: AnalysisResult,
     filename: str,
-    original_image: Image.Image | None = None,
-    gradcam_image: Image.Image | None = None,
     *,
+    original_image: Image.Image | None = None,
+    gradcam_images: dict[str, Image.Image] | None = None,
     image_hash: str,
     validation: SuitabilityValidationResult | None,
 ) -> bytes:
-    if original_image is None:
+    if not isinstance(original_image, Image.Image):
         raise SuitabilityGateError("A report requires the original image associated with the validated analysis.")
+    if gradcam_images is not None and (
+        not isinstance(gradcam_images, dict)
+        or any(not isinstance(image, Image.Image) for image in gradcam_images.values())
+    ):
+        raise TypeError("Grad-CAM images must be a mapping of pathology labels to PIL images.")
     require_suitability_pass(validation, image_hash, original_image)
     if result.image_hash != image_hash or result.image_fingerprint != validation.image_fingerprint:
         raise SuitabilityGateError("A report can only be generated for the validated analysis image.")
@@ -93,7 +99,7 @@ def generate_pdf_report(
 
     story = [
         Paragraph("LungLens AI — Radiograph Research Dossier", title_style),
-        Paragraph("PRETRAINED CHEST X-RAY MULTI-LABEL INFERENCE & ATTRIBUTION", subtitle_style),
+        Paragraph("PROJECT CHEST X-RAY MULTI-LABEL INFERENCE & ATTRIBUTION", subtitle_style),
         HRFlowable(width="100%", thickness=1, color=colors.HexColor("#0284C7"), spaceAfter=10),
         Paragraph(
             "<b>Research prototype evaluation only:</b> This dossier is generated for educational and algorithm research. "
@@ -147,18 +153,36 @@ def generate_pdf_report(
             ]
         )
     )
-    story.extend([meta_table, Spacer(1, 10), Paragraph("Model Pathology Outputs", h2_style)])
+    story.extend([meta_table, Spacer(1, 10), Paragraph("Independent Sigmoid Outputs", h2_style)])
+    if result.findings:
+        finding_text = ", ".join(_escape(item.label.replace("_", " ")) for item in result.findings)
+        story.append(Paragraph(f"<b>Outputs meeting their supplied cutoffs:</b> {finding_text}", meta_style))
+    else:
+        story.append(
+            Paragraph(
+                "<b>No output crossed its supplied per-disease cutoff.</b> This does not establish that the image is normal.",
+                meta_style,
+            )
+        )
+    story.append(Spacer(1, 6))
 
-    rows = [["Pathology Finding", "Activation Score", "Relative Index"]]
-    max_score = max((abs(p.score) for p in result.predictions), default=1.0) or 1.0
-    for idx, item in enumerate(result.predictions, start=1):
-        rel_pct = (abs(item.score) / max_score) * 100
-        rows.append([_escape(item.label), f"{item.score:.5f}", f"{rel_pct:.1f}% relative"])
+    rows = [["Pathology label", "Sigmoid score", "Val cutoff", "Cutoff status"]]
+    for item in result.predictions:
+        cutoff_status = "Meets cutoff" if item.meets_threshold else "Below cutoff"
+        threshold = f"{item.threshold:.4f}" if item.threshold is not None else "Not set"
+        rows.append(
+            [
+                _escape(item.label.replace("_", " ")),
+                f"{item.score:.5f}",
+                threshold,
+                cutoff_status,
+            ]
+        )
 
     if len(rows) == 1:
         rows.append(["No supported outputs were returned", "", ""])
 
-    table = Table(rows, colWidths=[3.4 * inch, 1.9 * inch, 1.9 * inch], repeatRows=1)
+    table = Table(rows, colWidths=[2.5 * inch, 1.45 * inch, 1.25 * inch, 1.95 * inch], repeatRows=1)
     table.setStyle(
         TableStyle(
             [
@@ -181,15 +205,69 @@ def generate_pdf_report(
     )
     story.extend([table, Spacer(1, 12)])
 
-    # Images section
-    for title, image in (
-        ("Input Radiograph (224 × 224 center-crop geometry preview)", original_image),
-        ("Grad-CAM Attribution Overlay (denseblock4 gradient localization)", gradcam_image),
-    ):
-        if image is not None:
-            story.append(Paragraph(title, h2_style))
-            story.append(_reportlab_image(image))
-            story.append(Spacer(1, 8))
+    gradcam_images = gradcam_images or {}
+
+    if result.findings:
+        story.append(Paragraph("Threshold-crossing findings and per-label Grad-CAM", h2_style))
+        for finding in result.findings:
+            label = finding.label.replace("_", " ")
+            description = EXPLANATIONS.get(finding.label, "No educational imaging reference is available.")
+            gradcam_image = gradcam_images.get(finding.label)
+            attribution_panel = (
+                _reportlab_image(gradcam_image, max_width=3.35 * inch)
+                if gradcam_image is not None
+                else Paragraph(
+                    "<b>Grad-CAM unavailable.</b> No usable positive attribution map was produced for this finding.",
+                    disclaimer_style,
+                )
+            )
+            image_pair = Table(
+                [
+                    [
+                        Paragraph("<b>Provided X-ray</b>", meta_style),
+                        Paragraph(
+                            f"<b>Grad-CAM · {_escape(label)}</b><br/>"
+                            f"Score: {finding.score:.4f} · Cutoff: {finding.threshold:.4f}",
+                            meta_style,
+                        ),
+                    ],
+                    [
+                        _reportlab_image(original_image, max_width=3.35 * inch),
+                        attribution_panel,
+                    ],
+                    [
+                        Paragraph(
+                            f"<b>General educational reference:</b> {_escape(description)} "
+                            f"{_escape(DISCLAIMER)}",
+                            disclaimer_style,
+                        ),
+                        "",
+                    ],
+                ],
+                colWidths=[3.55 * inch, 3.55 * inch],
+            )
+            image_pair.setStyle(
+                TableStyle(
+                    [
+                        ("SPAN", (0, 2), (1, 2)),
+                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ("GRID", (0, 0), (-1, 1), 0.4, colors.HexColor("#CBD5E1")),
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F1F5F9")),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                        ("TOPPADDING", (0, 0), (-1, -1), 6),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                    ]
+                )
+            )
+            story.extend([image_pair, Spacer(1, 10)])
+    else:
+        story.append(
+            Paragraph(
+                "No output crossed its supplied per-disease cutoff; no disease-specific Grad-CAM is shown.",
+                meta_style,
+            )
+        )
 
     story.append(
         Paragraph(
@@ -203,11 +281,11 @@ def generate_pdf_report(
     return buffer.getvalue()
 
 
-def _reportlab_image(image: Image.Image) -> ReportImage:
+def _reportlab_image(image: Image.Image, *, max_width: float = 4.8 * inch) -> ReportImage:
     image_buffer = BytesIO()
     image.convert("RGB").save(image_buffer, format="PNG")
     image_buffer.seek(0)
-    width = 4.8 * inch
+    width = max_width
     height = width * image.height / image.width
     maximum_height = 3.2 * inch
     if height > maximum_height:

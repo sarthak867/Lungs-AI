@@ -7,8 +7,6 @@ from PIL import Image
 from services.preprocessing import (
     FileValidationCode,
     ImageValidationError,
-    center_crop_image,
-    preprocess_image,
     validate_image,
     validate_uploaded_file,
 )
@@ -93,30 +91,6 @@ def test_file_validation_rejects_unsupported_content_even_with_png_extension():
     result = validate_uploaded_file(output.getvalue(), "misnamed.png")
     assert not result.accepted
     assert result.code is FileValidationCode.UNSUPPORTED_FORMAT
-
-
-def test_preprocess_image_returns_normalized_nchw_float32():
-    image = Image.new("L", (80, 40), color=255)
-    result = preprocess_image(image)
-    assert result.shape == (1, 1, 224, 224)
-    assert result.dtype == np.float32
-    assert np.isclose(result.min(), 1024.0)
-    assert np.isclose(result.max(), 1024.0)
-
-
-def test_preprocessing_uses_center_square_crop_and_xrv_normalization():
-    image = Image.new("L", (80, 40), color=0)
-    image.paste(255, (20, 0, 40, 40))
-    result = preprocess_image(image, input_size=8)
-    assert result.shape == (1, 1, 8, 8)
-    assert np.isclose(result.min(), -1024.0)
-    assert np.isclose(result.max(), 1024.0)
-
-
-def test_center_crop_preserves_square_model_input_geometry():
-    image = Image.new("L", (80, 40), color=0)
-    cropped = center_crop_image(image)
-    assert cropped.size == (40, 40)
 
 
 def test_validate_image_rejects_excessive_dimensions(monkeypatch):
