@@ -262,6 +262,13 @@ def test_streamlit_pdf_export_uses_original_image_and_gradcam_mapping(monkeypatc
     assert app.session_state["analysis"].findings
     assert app.session_state["gradcams"]
     assert any("Download Research Dossier (PDF)" in button.label for button in app.download_button)
+    assert not app.file_uploader
+    upload_another = next(button for button in app.button if button.label == "Upload another file")
+    upload_another.click().run(timeout=20)
+    assert not app.exception
+    assert not app.session_state.get("image_bytes")
+    assert app.file_uploader
+    assert not app.download_button
     assert not any("Could not compile PDF report dossier" in item.value for item in app.error)
 
 

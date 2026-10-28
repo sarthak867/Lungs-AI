@@ -980,38 +980,48 @@ def upload_panel(show_analysis_cta: bool = False) -> None:
         unsafe_allow_html=True,
     )
 
-    uploaded = st.file_uploader(
-        "Upload chest X-ray image",
-        type=["png", "jpg", "jpeg"],
-        key="xray_upload",
-        help="Upload a readable PNG or JPEG. File checks do not establish that the image is a chest radiograph.",
-        label_visibility="collapsed",
-    )
+    if "image_bytes" in st.session_state:
+        st.button(
+            "Upload another file",
+            key="upload_another_file",
+            icon=":material/upload_file:",
+            on_click=clear_upload,
+            width="stretch",
+        )
+    else:
+        uploaded = st.file_uploader(
+            "Upload chest X-ray image",
+            type=["png", "jpg", "jpeg"],
+            key="xray_upload",
+            help="Upload a readable PNG or JPEG. File checks do not establish that the image is a chest radiograph.",
+            label_visibility="collapsed",
+        )
 
-    if uploaded is not None:
-        data = uploaded.getvalue()
-        file_result = validate_uploaded_file(data, uploaded.name)
-        if not file_result.accepted or file_result.validated_image is None:
-            register_invalid_upload(st.session_state, file_result.reason)
-            st.error(file_result.reason)
-            logger.info("Rejected uploaded file (%s): %s", file_result.code.value, file_result.reason)
-        else:
-            digest = register_valid_upload(
-                st.session_state,
-                data,
-                uploaded.name,
-                file_result.validated_image,
-            )
-            if (
-                st.session_state.get("suitability_validation_hash") != digest
-                or st.session_state.get("suitability_validation_version") != classifier_revision()
-            ):
-                with st.spinner("Checking image..."):
-                    suitability = validate_chest_xray_suitability(
-                        file_result.validated_image.image,
-                        digest,
-                    )
-                attach_suitability_result(st.session_state, suitability)
+        if uploaded is not None:
+            data = uploaded.getvalue()
+            file_result = validate_uploaded_file(data, uploaded.name)
+            if not file_result.accepted or file_result.validated_image is None:
+                register_invalid_upload(st.session_state, file_result.reason)
+                st.error(file_result.reason)
+                logger.info("Rejected uploaded file (%s): %s", file_result.code.value, file_result.reason)
+            else:
+                digest = register_valid_upload(
+                    st.session_state,
+                    data,
+                    uploaded.name,
+                    file_result.validated_image,
+                )
+                if (
+                    st.session_state.get("suitability_validation_hash") != digest
+                    or st.session_state.get("suitability_validation_version") != classifier_revision()
+                ):
+                    with st.spinner("Checking image..."):
+                        suitability = validate_chest_xray_suitability(
+                            file_result.validated_image.image,
+                            digest,
+                        )
+                    attach_suitability_result(st.session_state, suitability)
+                st.rerun()
 
     # If image is present in session state, render technical inspection card
     if "image_bytes" in st.session_state:
@@ -1087,19 +1097,15 @@ def upload_panel(show_analysis_cta: bool = False) -> None:
                         f"Checkpoint classifier decision: {predicted_class} · X-Ray class score: "
                         f"{suitability.xray_score:.3f} · threshold: {XRAY_CLASSIFIER_THRESHOLD:.2f}"
                     )
-                btn_c1, btn_c2 = st.columns(2)
-                with btn_c1:
-                    if show_analysis_cta:
-                        st.button(
-                            "Proceed to Analysis Workspace →",
-                            type="primary",
-                            use_container_width=True,
-                            on_click=navigate_to,
-                            args=("Analyze X-Ray",),
-                            disabled=not suitability.accepted,
-                        )
-                with btn_c2:
-                    st.button("Remove Image", on_click=clear_upload, use_container_width=True)
+                if show_analysis_cta:
+                    st.button(
+                        "Proceed to Analysis Workspace →",
+                        type="primary",
+                        use_container_width=True,
+                        on_click=navigate_to,
+                        args=("Analyze X-Ray",),
+                        disabled=not suitability.accepted,
+                    )
 
         else:
             register_invalid_upload(st.session_state, file_result.reason)
@@ -1259,14 +1265,15 @@ def page_analysis() -> None:
         clear_result_state(st.session_state)
 
     # Action Toolbar
-    col_run, col_space = st.columns([1, 1])
+    col_run, col_report = st.columns([1, 1])
     with col_run:
         run_requested = st.button(
             "⚡ Run DenseNet-121 Analysis",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             key="run_analysis_btn",
         )
+    report_slot = col_report.empty()
 
     if run_requested:
         clear_result_state(st.session_state)
@@ -1477,14 +1484,15 @@ def page_analysis() -> None:
     with col_scores:
         render_predictions(result)
 
-    # Formal Research Dossier & PDF Export
-    render_report_section(
-        result=result,
-        image=image,
-        gradcam_images=st.session_state.get("gradcams", {}),
-        image_hash=image_hash,
-        validation=validation,
-    )
+    with report_slot:
+        render_report_section(
+            result=result,
+            image=image,
+            gradcam_images=st.session_state.get("gradcams", {}),
+            image_hash=image_hash,
+            validation=validation,
+            placeholder=report_slot,
+        )
 
 
 def render_report_section(
@@ -1493,18 +1501,8 @@ def render_report_section(
     gradcam_images: dict[str, Image.Image],
     image_hash: str,
     validation: SuitabilityValidationResult,
+    placeholder,
 ) -> None:
-    st.markdown(
-        """
-        <div class="dossier-card">
-            <div class="dossier-info">
-                <h4>Research Dossier Export</h4>
-                <p>Generate a structured research dossier containing actual model outputs, image previews, and Grad-CAM only when available.</p>
-            </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
     try:
         pdf_bytes = generate_pdf_report(
             result=result,
@@ -1516,26 +1514,17 @@ def render_report_section(
         )
     except Exception as exc:
         logger.exception("PDF generation failed: %s", exc)
-        st.error(f"Could not compile PDF report dossier: {exc}")
+        placeholder.error(f"Could not compile PDF report dossier: {exc}")
     else:
-        missing_attributions = [
-            finding.label for finding in result.findings if finding.label not in gradcam_images
-        ]
-        if missing_attributions:
-            st.caption(
-                "The PDF includes every threshold-crossing finding. Grad-CAM was unavailable for: "
-                + ", ".join(label.replace("_", " ") for label in missing_attributions)
-                + ". No attribution image is fabricated."
-            )
-        st.download_button(
+        placeholder.download_button(
             "Download Research Dossier (PDF)",
             data=pdf_bytes,
             file_name="lunglens-research-dossier.pdf",
             mime="application/pdf",
             type="primary",
+            key="research_dossier_download",
+            width="stretch",
         )
-
-    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def page_about() -> None:
