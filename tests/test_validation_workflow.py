@@ -175,6 +175,19 @@ def test_streamlit_upload_runs_local_gate_and_offers_analysis_only_on_pass():
         assert not app.session_state.get("analysis")
 
 
+def test_streamlit_load_sample_uses_bundled_xray_sample_jpg():
+    from streamlit.testing.v1 import AppTest
+
+    sample_path = Path(__file__).resolve().parents[1] / "assets" / "Xray sample.jpg"
+    app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py", default_timeout=20).run()
+    load_button = next(button for button in app.button if button.label == "Load Sample Image")
+    load_button.click().run(timeout=20)
+
+    assert not app.exception
+    assert app.session_state["image_name"] == sample_path.name
+    assert app.session_state["image_bytes"] == sample_path.read_bytes()
+
+
 def test_streamlit_rechecks_gate_before_inference_and_blocks_new_rejection(monkeypatch):
     from streamlit.testing.v1 import AppTest
 

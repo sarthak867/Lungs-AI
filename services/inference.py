@@ -150,7 +150,7 @@ def load_thresholds() -> dict[str, float]:
     except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         logger.exception("Could not read the per-disease threshold file.")
         raise ModelUnavailableError(
-            "The per-disease threshold file is invalid. Verify Disese_model/thresholds_my.json."
+            "The per-disease threshold file is invalid. Verify Disease_model/thresholds_my.json."
         ) from exc
 
 

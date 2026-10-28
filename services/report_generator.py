@@ -10,7 +10,7 @@ from reportlab.lib.units import inch
 from reportlab.platypus import HRFlowable, Image as ReportImage
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-from Disese_model.explanations import DISCLAIMER, EXPLANATIONS
+from Disease_model.explanations import DISCLAIMER, EXPLANATIONS
 from services.inference import AnalysisResult
 from services.modality_validation import (
     SuitabilityValidationResult,

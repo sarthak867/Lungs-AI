@@ -22,7 +22,7 @@ The gate is checked again when the user requests disease analysis. A rejection, 
 
 ## User workflow
 
-1. Open **Analyze X-Ray** and upload one PNG, JPG, or JPEG image. An optional bundled sample can be loaded from the upload panel; it goes through the same gate as an uploaded image.
+1. Open **Analyze X-Ray** and upload one PNG, JPG, or JPEG image. The upload panel can also load the bundled `assets/Xray sample.jpg`; it goes through the same gate as an uploaded image.
 2. The uploader is replaced by **Upload another file** while an image is loaded. Selecting it clears the current image and its associated validation, analysis, heatmaps, and report state, then brings the uploader back.
 3. Review the file-validation and chest-X-ray suitability status. Passing the gate permits research analysis but does not guarantee that the image is authentic, frontal, or clinically usable.
 4. Select **Run DenseNet-121 Analysis**. The app rechecks suitability before calling the disease model.
@@ -36,7 +36,7 @@ If no disease score crosses its cutoff, the app says so. This is **not** a `Norm
 - Windows, macOS, or Linux
 - Python 3.10 or later; Python 3.11 is a suitable choice for a new environment
 - The project disease-model assets listed below
-- A separately supplied `xray_classifier.pth` suitability checkpoint in the project root (details below)
+- The owner-created `xray_classifier.pth` suitability checkpoint in the project root
 
 Dependencies are listed in [`requirements.txt`](./requirements.txt). PyTorch and Torchvision must have compatible builds. The requirements file sets minimum versions, but if you need CUDA, install a PyTorch/Torchvision pair appropriate for your CUDA runtime using the official PyTorch installation instructions before installing or reconciling the remaining requirements.
 
@@ -48,15 +48,15 @@ These project-owned assets are expected at these exact paths:
 
 | File | Purpose |
 |---|---|
-| `Disese_model/my_densenet121.pt` | Raw PyTorch state dictionary for the fine-tuned 14-output DenseNet-121 |
-| `Disese_model/thresholds_my.json` | Per-label cutoffs and supplied threshold metadata |
-| `Disese_model/explanations.py` | General educational descriptions shown alongside threshold-crossing findings |
-| `Disese_model/test_results.csv` | Project-owner-provided aggregate evaluation summary |
-| `Disese_model/curves.png` | Supplied evaluation-curve image |
+| `Disease_model/my_densenet121.pt` | Raw PyTorch state dictionary for the fine-tuned 14-output DenseNet-121 |
+| `Disease_model/thresholds_my.json` | Per-label cutoffs and supplied threshold metadata |
+| `Disease_model/explanations.py` | General educational descriptions shown alongside threshold-crossing findings |
+| `Disease_model/test_results.csv` | Project-owner-provided aggregate evaluation summary |
+| `Disease_model/curves.png` | Supplied evaluation-curve image |
 
 The disease model is created as `torchvision.models.densenet121(weights=None)`, with a `Linear(1024, 14)` classifier. The raw state dictionary is loaded with `torch.load(..., weights_only=True)` and `strict=True`; no ImageNet checkpoint download is required at runtime.
 
-### X-ray suitability gate (must be supplied separately)
+### X-ray suitability gate (owner-created checkpoint)
 
 The gate checkpoint is expected at:
 
@@ -64,7 +64,7 @@ The gate checkpoint is expected at:
 xray_classifier.pth
 ```
 
-It is **not included in this repository** and is ignored by `.gitignore`. Obtain the checkpoint from the project owner and place it in the repository root. The loader expects a PyTorch checkpoint dictionary containing:
+This is the project owner's trained X-ray-versus-normal-photo classifier checkpoint and is included in this repository. The `.gitignore` does not exclude it. The application loads the checkpoint into a MobileNetV2 model with a two-output classifier. It expects a PyTorch checkpoint dictionary containing:
 
 - `state_dict`: MobileNetV2 weights matching the app's two-output classifier
 - `classes`: a two-item sequence containing `non_xray` and `xray`
@@ -132,7 +132,7 @@ The supplied validation-set Youden's J cutoffs are:
 | Pneumonia | 0.055817 |
 | Pneumothorax | 0.114990 |
 
-The application reads the values from `Disese_model/thresholds_my.json`; the JSON file is the runtime source of truth. They are shown here to make the default model configuration transparent. The project owner reports that these cutoffs were selected on validation data, not the test set.
+The application reads the values from `Disease_model/thresholds_my.json`; the JSON file is the runtime source of truth. They are shown here to make the default model configuration transparent. The project owner reports that these cutoffs were selected on validation data, not the test set.
 
 ### Exact disease-model inference preprocessing
 
@@ -146,11 +146,11 @@ Training-only random resized crop, rotation, color jitter, and any horizontal fl
 
 ## Model provenance and reported evaluation
 
-According to details supplied by the project owner, the disease checkpoint is a torchvision DenseNet-121 initialized from ImageNet weights and fine-tuned on NIH ChestX-ray14. The owner reports using the official NIH train/test split, a patient-level validation split, and selecting epoch 6 as the best checkpoint by validation mean AUROC (`0.8285`). These training details have not been independently reproduced in this repository.
+According to details supplied by the project owner, the disease checkpoint is a torchvision DenseNet-121 initialized from ImageNet weights and fine-tuned on NIH ChestX-ray14. The owner reports using the official NIH train/test split, a patient-level validation split, and selecting epoch 6 as the best checkpoint by validation mean AUROC (`0.8285`). These training details have not been independently reproduced in this repository. The separate X-ray suitability checkpoint was trained by the project owner and is included as `xray_classifier.pth`; its training dataset, evaluation metrics, and formal license were not supplied, so its detection performance is not independently established here.
 
-The owner-provided `Disese_model/test_results.csv` reports mean test AUROC `0.799` and mean AUPRC `0.253` across the 14 labels. These are owner-reported aggregate figures, not a clinical validation or a guarantee of performance on another population or institution. The owner reports low specificity for some labels (approximately `0.39` for Consolidation, `0.50` for Infiltration, and `0.53` for Effusion) at the supplied cutoffs. The Hernia cutoff is especially uncertain because of the small number of positive examples reported for validation.
+The owner-provided `Disease_model/test_results.csv` reports mean test AUROC `0.799` and mean AUPRC `0.253` across the 14 labels. These are owner-reported aggregate figures, not a clinical validation or a guarantee of performance on another population or institution. The owner reports low specificity for some labels (approximately `0.39` for Consolidation, `0.50` for Infiltration, and `0.53` for Effusion) at the supplied cutoffs. The Hernia cutoff is especially uncertain because of the small number of positive examples reported for validation.
 
-The project owner reports NIH ChestX-ray14 as CC0/public domain based on the Kaggle dataset page; verify the dataset's applicable terms independently. Torchvision/ImageNet terms may also apply. No separate license statement for the project-trained checkpoint or the gate checkpoint was supplied. Verify rights before redistribution or commercial use.
+The project owner reports NIH ChestX-ray14 as CC0/public domain based on the Kaggle dataset page; verify the dataset's applicable terms independently. Torchvision/ImageNet terms may also apply. The project owner trained the gate checkpoint; a formal license statement for the trained checkpoints was not supplied. Verify applicable rights before redistribution or commercial use.
 
 ## Grad-CAM and PDF report
 
@@ -173,7 +173,7 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-Place the separately supplied `xray_classifier.pth` in the repository root, then start the app:
+The owner-created `xray_classifier.pth` is included in the repository root. Start the app:
 
 ```powershell
 streamlit run app.py
@@ -192,7 +192,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-# Put the separately supplied xray_classifier.pth in the repository root.
+# The owner-created xray_classifier.pth checkpoint is included in the repository root.
 streamlit run app.py
 ```
 
@@ -213,7 +213,7 @@ macOS or Linux:
 LUNGLENS_XRAY_THRESHOLD=0.8 streamlit run app.py
 ```
 
-The value must be between `0` and `1`. Changing it affects only the input-suitability gate. Disease cutoffs remain in `Disese_model/thresholds_my.json`.
+The value must be between `0` and `1`. Changing it affects only the input-suitability gate. Disease cutoffs remain in `Disease_model/thresholds_my.json`.
 
 ## Running tests
 
@@ -229,7 +229,7 @@ Or, on macOS/Linux:
 python -m pytest -v
 ```
 
-The last observed full run completed with **54 passed**. Tests cover image decoding and file limits, suitability states and gating, checkpoint loading, preprocessing, sigmoid and cutoff behavior, state clearing after upload changes, Grad-CAM gating, PDF content/export, and Streamlit workflow. App logic tests use mocked gate decisions and synthetic inputs where appropriate; those tests verify software control flow, **not classifier accuracy**. A checkpoint smoke test checks that the supplied disease weights load and produce 14 finite scores. The live gate checkpoint test is skipped when `xray_classifier.pth` is not present.
+The latest recorded full test run completed with **54 passed** before the directory and bundled sample-image updates in this revision. Tests cover image decoding and file limits, suitability states and gating, checkpoint loading, preprocessing, sigmoid and cutoff behavior, state clearing after upload changes, Grad-CAM gating, PDF content/export, and Streamlit workflow. App logic tests use mocked gate decisions and synthetic inputs where appropriate; those tests verify software control flow, **not classifier accuracy**. Checkpoint smoke tests verify that model weights load and return outputs of the expected shape; they do not prove classifier accuracy.
 
 ## Troubleshooting
 
@@ -244,12 +244,12 @@ The last observed full run completed with **54 passed**. Tests cover image decod
 
 - Try a frontal chest X-ray in PNG or JPEG format.
 - Rejection means the gate score was below the configured cutoff; it is not a clinical opinion.
-- The supplied gate has not been independently evaluated here. Its pass/reject result is not a guarantee of modality.
-- The bundled sample is known to receive an X-ray score of approximately `0.0183` with the supplied local gate and is rejected at the default `0.8` cutoff. It is a UI/demo asset, not a verified passing example.
+- The owner-created gate has not been independently evaluated here. Its pass/reject result is not a guarantee of modality.
+- The bundled `assets/Xray sample.jpg` is the sample image loaded by the UI and is evaluated by the same gate as uploaded files. A rejection is not bypassed just because the image is bundled.
 
 ### Disease model unavailable
 
-- Confirm `Disese_model/my_densenet121.pt` and `Disese_model/thresholds_my.json` exist and are readable.
+- Confirm `Disease_model/my_densenet121.pt` and `Disease_model/thresholds_my.json` exist and are readable.
 - Confirm the checkpoint matches the documented DenseNet-121 architecture and 14-label output order.
 - Ensure the Python environment can import compatible PyTorch and Torchvision builds.
 

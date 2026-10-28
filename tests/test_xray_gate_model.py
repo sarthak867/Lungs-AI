@@ -54,7 +54,7 @@ def test_provided_checkpoint_loads_strictly_and_scores_sample_xray():
     assert list(classes) == ["non_xray", "xray"]
     assert model.training is False
 
-    image = Image.open("assets/sample_xray.png")
+    image = Image.open("assets/Xray sample.jpg")
     score = xray_gate_model.predict_xray_score(image)
     assert 0.0 <= score <= 1.0
     decision = xray_gate_model.classify_chest_xray(image)

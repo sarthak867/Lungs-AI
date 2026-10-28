@@ -38,8 +38,8 @@ from services.upload_state import (
     register_valid_upload,
 )
 from services.xray_gate_model import classifier_revision
-from Disese_model.explanations import DISCLAIMER as DISEASE_DISCLAIMER
-from Disese_model.explanations import EXPLANATIONS
+from Disease_model.explanations import DISCLAIMER as DISEASE_DISCLAIMER
+from Disease_model.explanations import EXPLANATIONS
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -925,10 +925,10 @@ def clear_upload() -> None:
 
 
 def load_sample_radiograph() -> None:
-    sample_file = PROJECT_ROOT / "assets" / "sample_xray.png"
+    sample_file = PROJECT_ROOT / "assets" / "Xray sample.jpg"
     if sample_file.exists():
         data = sample_file.read_bytes()
-        file_result = validate_uploaded_file(data, "sample_chest_xray.png")
+        file_result = validate_uploaded_file(data, sample_file.name)
         if not file_result.accepted or file_result.validated_image is None:
             register_invalid_upload(st.session_state, file_result.reason)
             logger.warning("Bundled sample image failed file validation: %s", file_result.reason)
@@ -936,7 +936,7 @@ def load_sample_radiograph() -> None:
         register_valid_upload(
             st.session_state,
             data,
-            "sample_chest_xray.png",
+            sample_file.name,
             file_result.validated_image,
         )
         st.toast("Loaded bundled sample image", icon="🫁")
@@ -1330,7 +1330,7 @@ def page_analysis() -> None:
                 except ModelUnavailableError as exc:
                     logger.error("Model unavailable: %s", exc)
                     st.error(
-                        "Disease model unavailable. Verify Disese_model/my_densenet121.pt, the threshold JSON, and the PyTorch installation."
+                        "Disease model unavailable. Verify Disease_model/my_densenet121.pt, the threshold JSON, and the PyTorch installation."
                     )
                 except InferenceError as exc:
                     logger.error("Inference failed: %s", exc)
@@ -1567,7 +1567,7 @@ def page_about() -> None:
                 <h3 style="margin-top:0; color:var(--text-primary);">Project disease model</h3>
                 <p style="color:var(--text-secondary); font-size:13px; line-height:1.6;">
                     A locally loaded torchvision DenseNet-121 fine-tuned by the project owner on NIH ChestX-ray14 data. The checkpoint is
-                    <code>Disese_model/my_densenet121.pt</code>; its raw 14-output logits are converted with independent
+                    <code>Disease_model/my_densenet121.pt</code>; its raw 14-output logits are converted with independent
                     sigmoid functions, not softmax.
                 </p>
                 <div style="background:var(--bg-surface); padding:12px; border-radius:8px; border:1px solid var(--border-light); font-size:12px; color:var(--text-muted); line-height:1.6;">

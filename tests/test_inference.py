@@ -163,7 +163,7 @@ def test_threshold_findings_are_ordered_by_score_descending():
 def test_checkpoint_smoke_inference_returns_14_finite_sigmoid_scores():
     if not DISEASE_MODEL_CHECKPOINT.is_file():
         pytest.skip("Project-provided disease checkpoint is not present.")
-    image = Image.open("assets/sample_xray.png")
+    image = Image.open("assets/Xray sample.jpg")
     validation = validate_chest_xray_suitability(
         image,
         "checkpoint-smoke-test",

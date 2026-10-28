@@ -6,6 +6,5 @@ venv/
 .claude/
 .pytest_cache/
 .streamlit/secrets.toml
-xray_classifier.pth
 reports/*
 !reports/.gitkeep
